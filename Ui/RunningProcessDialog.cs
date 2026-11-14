@@ -8,14 +8,14 @@ namespace HdrBrightControl
 {
     internal sealed class RunningProcessDialog : Form
     {
-        private const int DialogWidth = 560;
+        private const int DialogWidth = 640;
         private const int DialogHeight = 420;
-        private const int TitleMaxLength = 60;
+        private const int TitleMaxLength = 80;
 
         private readonly ListBox _list;
         private readonly List<(string Name, string Title, string? Path)> _rows;
 
-        public (string Name, string? Path)? Selected { get; private set; }
+        public (string Name, string? WindowTitle, string? Path)? Selected { get; private set; }
 
         public RunningProcessDialog(IEnumerable<(string Name, string Title, string? Path)> processes, Icon? icon)
         {
@@ -33,10 +33,10 @@ namespace HdrBrightControl
             _list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             foreach (var row in _rows)
             {
-                string title = row.Title.Length > TitleMaxLength
+                string displayTitle = row.Title.Length > TitleMaxLength
                     ? row.Title[..(TitleMaxLength - 3)] + "..."
                     : row.Title;
-                _list.Items.Add($"{row.Name}   —   {title}");
+                _list.Items.Add($"{row.Name}   —   {displayTitle}");
             }
 
             var ok = new Button { Text = "添加", DialogResult = DialogResult.OK, AutoSize = true };
@@ -66,7 +66,10 @@ namespace HdrBrightControl
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             if (DialogResult == DialogResult.OK && _list.SelectedIndex >= 0)
-                Selected = (_rows[_list.SelectedIndex].Name, _rows[_list.SelectedIndex].Path);
+            {
+                var row = _rows[_list.SelectedIndex];
+                Selected = (row.Name, row.Title, row.Path);
+            }
             base.OnFormClosing(e);
         }
     }

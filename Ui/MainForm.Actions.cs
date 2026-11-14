@@ -217,11 +217,11 @@ namespace HdrBrightControl
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.WindowTitle);
             RebuildGames(kind);
         }
 
-        private (string Name, string? Path)? PickRunningProcess()
+        private (string Name, string? WindowTitle, string? Path)? PickRunningProcess()
         {
             var allWindows = new List<WindowInfo>();
 

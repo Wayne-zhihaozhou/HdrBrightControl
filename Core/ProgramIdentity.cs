@@ -22,6 +22,9 @@ namespace HdrBrightControl
         public bool IsHdr { get; init; }
 
         public string? ExePath { get; init; }
+
+        /// <summary>Optional window title for per-window HDR/SDR control. When set, only this specific window triggers the rule.</summary>
+        public string? WindowTitle { get; set; }
     }
 
     /// <summary>Result of identifying a running process: the list entry it belongs to, and how it was recognised.</summary>
@@ -72,15 +75,28 @@ namespace HdrBrightControl
             !string.IsNullOrEmpty(processName) && _byName.TryGetValue(processName, out var program) ? program : null;
 
         /// <summary>The entry this running process belongs to, or a miss.</summary>
-        public ProgramMatch MatchProcess(string processName, int processId)
+        public ProgramMatch MatchProcess(string processName, int processId) =>
+            MatchByWindow(processName, null, processId);
+
+        /// <summary>The entry for a specific window: matches by process name and optional window title.</summary>
+        public ProgramMatch MatchByWindow(string processName, string? windowTitle, int processId)
         {
             var byName = Match(processName);
-            if (byName != null) return new ProgramMatch(byName, ProgramMatchKind.Name);
+            if (byName != null && HasNoWindowTitleFilter(byName))
+                return new ProgramMatch(byName, ProgramMatchKind.Name);
+
             if (processId <= 0 || (_byExe.Count == 0 && _productFolders.Count == 0)) return ProgramMatch.None;
 
             string? exePath = ProgramIdentity.ExePath(processId, processName);
             if (exePath == null) return ProgramMatch.None;
-            if (_byExe.TryGetValue(exePath, out var byPath)) return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
+
+            if (_byExe.TryGetValue(exePath, out var byPath))
+            {
+                if (HasNoWindowTitleFilter(byPath))
+                    return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
+                if (string.Equals(windowTitle, byPath.WindowTitle, StringComparison.Ordinal))
+                    return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
+            }
 
             // Only exes that share a folder with a listed program are worth their version info
             string? folder = Folder(exePath);
@@ -89,10 +105,19 @@ namespace HdrBrightControl
             string? product = ProgramIdentity.ProductName(exePath);
             if (product == null) return ProgramMatch.None;
 
-            return _byProduct.TryGetValue(ProductKey(folder, product), out var byProduct)
-                ? new ProgramMatch(byProduct, ProgramMatchKind.Product)
-                : ProgramMatch.None;
+            var key = ProductKey(folder, product);
+            if (!_byProduct.TryGetValue(key, out var byProduct)) return ProgramMatch.None;
+
+            if (HasNoWindowTitleFilter(byProduct))
+                return new ProgramMatch(byProduct, ProgramMatchKind.Product);
+            if (string.Equals(windowTitle, byProduct.WindowTitle, StringComparison.Ordinal))
+                return new ProgramMatch(byProduct, ProgramMatchKind.Product);
+
+            return ProgramMatch.None;
         }
+
+        private static bool HasNoWindowTitleFilter(ListedProgram program) =>
+            string.IsNullOrWhiteSpace(program.WindowTitle);
 
         private void IndexExe(ListedProgram program)
         {

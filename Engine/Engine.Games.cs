@@ -7,12 +7,32 @@ namespace HdrBrightControl
 {
     public sealed partial class HdrEngine
     {
-        public static string CleanExeInput(string rawInput)
+        private const string EntrySeparator = "|";
+
+        internal static string CleanExeInput(string rawInput)
         {
             string trimmed = rawInput.Trim().Trim('"', '\'');
             if (trimmed.Contains('\\') || trimmed.Contains('/') || trimmed.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
                 trimmed = Path.GetFileNameWithoutExtension(trimmed);
             return trimmed.ToLowerInvariant();
+        }
+
+        /// <summary>Parses a config entry into process name and optional window title.</summary>
+        internal static (string ProcessName, string? WindowTitle) ParseEntry(string entry)
+        {
+            int sepIndex = entry.IndexOf(EntrySeparator);
+            if (sepIndex <= 0) return (entry.ToLowerInvariant(), null);
+
+            var procName = entry[..sepIndex].ToLowerInvariant();
+            var winTitle = entry[(sepIndex + 1)..];
+            return string.IsNullOrWhiteSpace(winTitle) ? (procName, null) : (procName, winTitle);
+        }
+
+        /// <summary>Formats a process name and optional window title into a config entry.</summary>
+        internal static string FormatEntry(string processName, string? windowTitle)
+        {
+            if (string.IsNullOrWhiteSpace(windowTitle)) return processName;
+            return string.Concat(processName, EntrySeparator, windowTitle);
         }
 
         /// <summary>Rows for one of the two lists: every library game (real name, source, icon) plus its own programs.</summary>
@@ -30,17 +50,23 @@ namespace HdrBrightControl
                 var rows = new List<GameRow>();
                 var processes = list ?? new List<string>();
 
-                foreach (string process in processes)
+                foreach (string entry in processes)
                 {
+                    var (processName, windowTitle) = ParseEntry(entry);
+                    string displayName = !string.IsNullOrWhiteSpace(windowTitle) ? $"{processName}（{WindowTitleToDisplay(windowTitle)}）" : processName;
+                    string subtitle = !string.IsNullOrWhiteSpace(windowTitle)
+                        ? $"子窗口  ·  {windowTitle}"
+                        : $"程序  ·  {processName}.exe";
+
                     rows.Add(new GameRow
                     {
-                        Key = "proc:" + process,
-                        Name = process,
-                        Subtitle = $"程序  ·  {process}.exe",
-                        Processes = new List<string> { process },
-                        ExePath = paths.TryGetValue(process, out var path) ? path : null,
-                        Tracked = kind == ProgramListKind.Sdr || IsHdrEnabledFor(hdrModes, process),
-                        Brightness = brightnessMap.TryGetValue(process, out int brightness) ? brightness : (int)BrightnessRange.Default
+                        Key = "proc:" + processName,
+                        Name = displayName,
+                        Subtitle = subtitle,
+                        Processes = new List<string> { processName },
+                        ExePath = paths.TryGetValue(processName, out var path) ? path : null,
+                        Tracked = kind == ProgramListKind.Sdr || IsHdrEnabledFor(hdrModes, processName),
+                        Brightness = brightnessMap.TryGetValue(processName, out int brightness) ? brightness : (int)BrightnessRange.Default
                     });
                 }
 
@@ -48,6 +74,12 @@ namespace HdrBrightControl
                            .ThenBy(r => r.Name, Cmp)
                            .ToList();
             }
+        }
+
+        private static string WindowTitleToDisplay(string windowTitle)
+        {
+            const int MaxLen = 30;
+            return windowTitle.Length > MaxLen ? windowTitle[..(MaxLen - 3)] + "..." : windowTitle;
         }
 
         private static long LastLaunchTime(IEnumerable<string> processes, Dictionary<string, long> lastLaunched)
@@ -79,7 +111,7 @@ namespace HdrBrightControl
         }
 
         /// <summary>Adds a program to one of the two lists; it is removed from the other one.</summary>
-        public bool AddGame(string procName, string? exePath = null, ProgramListKind kind = ProgramListKind.Hdr)
+        public bool AddGame(string procName, string? exePath = null, ProgramListKind kind = ProgramListKind.Hdr, string? windowTitle = null)
         {
             if (string.IsNullOrWhiteSpace(procName) ||
                 procName.Equals(ProcessNames.Explorer, StringComparison.OrdinalIgnoreCase) ||
@@ -91,15 +123,16 @@ namespace HdrBrightControl
 
             procName = procName.ToLowerInvariant();
             string listName = kind == ProgramListKind.Sdr ? "SDR" : "HDR";
+            string configEntry = FormatEntry(procName, windowTitle);
 
             lock (Sync)
             {
                 var target = kind == ProgramListKind.Sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
                 var other = kind == ProgramListKind.Sdr ? Config.HdrGamesAndApps : Config.SdrGamesAndApps;
 
-                if (!target.Contains(procName, Cmp))
+                if (!target.Exists(e => Cmp.Equals(ParseEntry(e).ProcessName, procName)))
                 {
-                    target.Add(procName);
+                    target.Add(configEntry);
                     target.Sort(Cmp);
                     Log("LIST", $"+ '{procName}' 已添加到 {listName} 列表");
                 }
@@ -108,8 +141,14 @@ namespace HdrBrightControl
                     Log("LIST", $"'{procName}' 已在 {listName} 列表中");
                 }
 
-                if (other.RemoveAll(name => name.Equals(procName, StringComparison.OrdinalIgnoreCase)) > 0)
-                    Log("LIST", $"'{procName}' 已从 {(kind == ProgramListKind.Sdr ? "SDR" : "HDR")} 列表移除");
+                foreach (var otherEntry in other.ToList())
+                {
+                    if (Cmp.Equals(ParseEntry(otherEntry).ProcessName, procName))
+                    {
+                        other.Remove(otherEntry);
+                        Log("LIST", $"'{procName}' 已从 {(kind == ProgramListKind.Sdr ? "SDR" : "HDR")} 列表移除");
+                    }
+                }
 
                 if (kind == ProgramListKind.Sdr) Config.GameHdrModes.Remove(procName);
                 else Config.GameHdrModes[procName] = true;
@@ -133,7 +172,7 @@ namespace HdrBrightControl
 
                 foreach (string process in procList)
                 {
-                    target.RemoveAll(name => name.Equals(process, StringComparison.OrdinalIgnoreCase));
+                    target.RemoveAll(name => Cmp.Equals(ParseEntry(name).ProcessName, process));
                     Config.ProgramPaths.Remove(process);
                     if (kind == ProgramListKind.Hdr) Config.GameHdrModes.Remove(process);
                 }
