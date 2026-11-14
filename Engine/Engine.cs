@@ -105,31 +105,24 @@ namespace HdrBrightControl
             {
                 var paths = c.ProgramPaths ?? new Dictionary<string, string>(Cmp);
                 var hdr = new List<string>(c.HdrGamesAndApps ?? new List<string>());
-                hdr.RemoveAll(process => !IsHdrEnabledFor(c.GameHdrModes, HdrEngine.ParseEntry(process).ProcessName));
+                hdr.RemoveAll(process => !IsHdrEnabledFor(c.GameHdrModes, process));
 
                 var programs = new List<ListedProgram>(hdr.Count);
-                foreach (string entry in hdr)
-                {
-                    var (procName, window) = HdrEngine.ParseEntry(entry);
-                    programs.Add(Listed(procName, isHdr: true, paths, window));
-                }
+                foreach (string process in hdr)
+                    programs.Add(Listed(process, isHdr: true, paths));
 
-                foreach (string entry in c.SdrGamesAndApps ?? new List<string>())
-                {
-                    var (procName, window) = HdrEngine.ParseEntry(entry);
-                    if (!programs.Exists(p => string.Equals(p.Entry, procName, StringComparison.OrdinalIgnoreCase)))
-                        programs.Add(Listed(procName, isHdr: false, paths, window));
-                }
+                foreach (string process in c.SdrGamesAndApps ?? new List<string>())
+                    if (!programs.Exists(entry => string.Equals(entry.Entry, process, StringComparison.OrdinalIgnoreCase)))
+                        programs.Add(Listed(process, isHdr: false, paths));
 
                 return programs;
             }
 
-            private static ListedProgram Listed(string process, bool isHdr, Dictionary<string, string> paths, WindowFilter? window) => new()
+            private static ListedProgram Listed(string process, bool isHdr, Dictionary<string, string> paths) => new()
             {
                 Entry = process,
                 IsHdr = isHdr,
-                ExePath = paths.TryGetValue(process, out var path) ? path : null,
-                Window = window
+                ExePath = paths.TryGetValue(process, out var path) ? path : null
             };
 
             /// <summary>TV brightness per list entry: per-program config value.</summary>
@@ -167,8 +160,6 @@ namespace HdrBrightControl
         private string? _runningSdrApp;
         private ListedProgram? _contentProgram;
         private string _contentProcess = string.Empty;
-        private string _contentWindowClass = string.Empty;
-        private string _contentWindowTitle = string.Empty;
         private int _contentProcessId;
         private readonly HashSet<string> _identityLogged = new(Cmp);
 
@@ -328,11 +319,11 @@ namespace HdrBrightControl
                 _nextProcessScanMs = 0;
             }
 
-            var (procName, procClass, procTitle, isFullscreen, procId) = WindowDetector.GetActiveWindowInfo();
+            var (procName, _, isFullscreen, procId) = WindowDetector.GetActiveWindowInfo();
             _foregroundProcess = procName;
             _foregroundFullscreen = isFullscreen;
 
-            UpdateForegroundProgram(snapshot, procName, procClass, procTitle, procId);
+            UpdateForegroundProgram(snapshot, procName, procId);
 
             RefreshHdrState(now);
 
@@ -359,20 +350,17 @@ namespace HdrBrightControl
         /// <summary>
         /// The program that owns HDR and the TV brightness right now. This app's own window does not count as content:
         /// opening the settings must not hand the screen to the desktop brightness and back, so the last real
-        /// foreground program keeps deciding until another one takes over. The class and title are remembered with it
-        /// so a filter on one window of a process keeps seeing the same window while another window is in front.
+        /// foreground program keeps deciding until another one takes over.
         /// </summary>
-        private void UpdateForegroundProgram(Snapshot snapshot, string processName, string windowClass, string windowTitle, int processId)
+        private void UpdateForegroundProgram(Snapshot snapshot, string processName, int processId)
         {
             if (!string.IsNullOrEmpty(processName) && !IsSelf(processName))
             {
                 _contentProcess = processName;
-                _contentWindowClass = windowClass;
-                _contentWindowTitle = windowTitle;
                 _contentProcessId = processId;
             }
 
-            var match = snapshot.Programs.MatchByWindow(_contentProcess, _contentWindowClass, _contentWindowTitle, _contentProcessId);
+            var match = snapshot.Programs.MatchProcess(_contentProcess, _contentProcessId);
             _contentProgram = match.Program;
 
             if (match.Kind is ProgramMatchKind.ExePath or ProgramMatchKind.Product)

@@ -4,8 +4,6 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -13,24 +11,6 @@ namespace HdrBrightControl
 {
     public sealed partial class MainForm
     {
-        private static readonly IntPtr IntPtrZero = IntPtr.Zero;
-
-        [DllImport("user32.dll")]
-        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-
-        [DllImport("user32.dll")]
-        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-
-        [DllImport("user32.dll")]
-        private static extern bool IsWindowVisible(IntPtr hWnd);
-
-        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
         private void RebuildGames(ProgramListKind kind)
         {
             var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
@@ -207,62 +187,27 @@ namespace HdrBrightControl
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.Window);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind);
             RebuildGames(kind);
         }
 
-        /// <summary>
-        /// Collects the visible top-level windows of all other processes. Child windows are left out on purpose: the
-        /// foreground window is always a top-level one, so an entry for a child window could never match.
-        /// </summary>
-        private (string Name, WindowFilter? Window, string? Path)? PickRunningProcess()
+        private (string Name, string? Path)? PickRunningProcess()
         {
-            var windows = new List<(uint ProcessId, string ClassName, string Title)>();
-
-            EnumWindows((hWnd, _) =>
-            {
-                if (!IsWindowVisible(hWnd)) return true;
-
-                GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid == 0) return true;
-
-                var titleBuf = new StringBuilder(512);
-                GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
-                string title = titleBuf.ToString();
-                if (string.IsNullOrWhiteSpace(title)) return true;
-
-                var classBuf = new StringBuilder(256);
-                GetClassName(hWnd, classBuf, classBuf.Capacity);
-                string className = classBuf.ToString();
-
-                windows.Add((pid, className, title));
-                return true;
-            }, IntPtrZero);
-
-            var choices = new List<WindowChoice>();
-            var seen = new HashSet<(string Process, string Title)>();
-
-            foreach (var window in windows.OrderBy(w => w.ProcessId).ThenBy(w => w.Title, StringComparer.CurrentCulture))
+            var rows = new List<(string Name, string Title, string? Path)>();
+            foreach (var process in Process.GetProcesses())
             {
                 try
                 {
-                    using var process = Process.GetProcessById((int)window.ProcessId);
-                    string processName = process.ProcessName.ToLowerInvariant();
-                    if (processName.Equals(HdrEngine.SelfProcessName, StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!seen.Add((processName, window.Title))) continue;
-
-                    choices.Add(new WindowChoice(processName, window.ClassName, window.Title,
-                        ProcessPaths.TryGetExePath(process.Id)));
+                    if (process.MainWindowHandle == IntPtr.Zero || string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
+                    rows.Add((process.ProcessName.ToLowerInvariant(), process.MainWindowTitle, ProcessPaths.TryGetExePath(process.Id)));
                 }
                 catch { }
+                finally { process.Dispose(); }
             }
 
-            choices = choices
-                .OrderBy(choice => choice.Name, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(choice => choice.Title, StringComparer.CurrentCulture)
-                .ToList();
+            rows = rows.GroupBy(row => row.Name).Select(group => group.First()).OrderBy(row => row.Name).ToList();
 
-            using var dialog = new RunningProcessDialog(choices, _windowIcon);
+            using var dialog = new RunningProcessDialog(rows, _windowIcon);
             if (dialog.ShowDialog(this) != DialogResult.OK) return null;
             return dialog.Selected;
         }

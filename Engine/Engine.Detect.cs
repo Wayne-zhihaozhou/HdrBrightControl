@@ -10,8 +10,7 @@ namespace HdrBrightControl
         /// <summary>
         /// One pass over all processes for the HDR game and the SDR program that are running. A program is found by
         /// its process name or, for programs that start a sibling exe, by its exe; the remembered window in front is
-        /// dropped as soon as its process is gone. Programs restricted to some of their windows are skipped here –
-        /// they only match while such a window is in front (handled by UpdateForegroundProgram).
+        /// dropped as soon as its process is gone.
         /// </summary>
         private void ScanRunningPrograms(Snapshot snapshot)
         {
@@ -36,8 +35,6 @@ namespace HdrBrightControl
                     var program = snapshot.Programs.MatchProcess(name, process.Id).Program;
                     if (program == null) continue;
 
-                    if (program.Window != null) continue;
-
                     if (program.IsHdr)
                     {
                         if (game != null) continue;
@@ -61,8 +58,6 @@ namespace HdrBrightControl
             if (!contentRunning)
             {
                 _contentProcess = string.Empty;
-                _contentWindowClass = string.Empty;
-                _contentWindowTitle = string.Empty;
                 _contentProcessId = 0;
                 _contentProgram = null;
             }

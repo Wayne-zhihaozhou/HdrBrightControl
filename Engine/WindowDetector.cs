@@ -35,9 +35,6 @@ namespace HdrBrightControl
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder strText, int maxCount);
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-
         [DllImport("user32.dll")]
         private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
@@ -52,38 +49,32 @@ namespace HdrBrightControl
         [DllImport("user32.dll")]
         private static extern bool EnumChildWindows(IntPtr hWnd, EnumChildProc callback, IntPtr lParam);
 
+        [ThreadStatic]
+        private static StringBuilder? _titleBuffer;
+
         private static readonly object PidLock = new();
         private static IntPtr _cachedHwnd;
         private static uint _cachedPid;
         private static string _cachedName = string.Empty;
 
-        [ThreadStatic]
-        private static StringBuilder? _textBuffer;
-
         /// <summary>
-        /// Process name, window class, window title, fullscreen state and process id of the window in front
-        /// (empty strings and 0 when there is none). The title is read every tick because applications change it
-        /// constantly; the class is what stays stable, the title is what separates windows of the same class.
+        /// Process name, window title, fullscreen state and process id of the window in front
+        /// (empty strings and 0 when there is none).
         /// </summary>
-        public static (string ProcessName, string WindowClass, string WindowTitle, bool IsFullscreen, int ProcessId) GetActiveWindowInfo()
+        public static (string ProcessName, string WindowTitle, bool IsFullscreen, int ProcessId) GetActiveWindowInfo()
         {
             IntPtr hWnd = GetForegroundWindow();
-            if (hWnd == IntPtr.Zero) return (string.Empty, string.Empty, string.Empty, false, 0);
+            if (hWnd == IntPtr.Zero) return (string.Empty, string.Empty, false, 0);
 
-            var classBuf = _textBuffer ??= new StringBuilder(512);
-            classBuf.Clear();
-            GetClassName(hWnd, classBuf, classBuf.Capacity);
-            string windowClass = classBuf.ToString();
-
-            classBuf.Clear();
-            GetWindowText(hWnd, classBuf, classBuf.Capacity);
-            string windowTitle = classBuf.ToString();
+            var title = _titleBuffer ??= new StringBuilder(512);
+            title.Clear();
+            GetWindowText(hWnd, title, title.Capacity);
 
             GetWindowThreadProcessId(hWnd, out uint pid);
             string processName = GetProcessNameCached(hWnd, pid);
             bool isFullscreen = !IsShellProcess(processName) && IsWindowFullscreen(hWnd);
 
-            return (processName, windowClass, windowTitle, isFullscreen, (int)pid);
+            return (processName, title.ToString(), isFullscreen, (int)pid);
         }
 
         /// <summary>The desktop and the search window are never "fullscreen content".</summary>
