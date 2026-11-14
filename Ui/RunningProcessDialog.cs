@@ -10,16 +10,16 @@ namespace HdrBrightControl
     {
         private const int DialogWidth = 640;
         private const int DialogHeight = 420;
-        private const int TitleMaxLength = 80;
+        private const int MaxDisplayLength = 80;
 
         private readonly ListBox _list;
-        private readonly List<(string Name, string Title, string? Path)> _rows;
+        private readonly List<(string Name, string ClassName, string? Path)> _rows;
 
-        public (string Name, string? WindowTitle, string? Path)? Selected { get; private set; }
+        public (string Name, string? WindowClass, string? Path)? Selected { get; private set; }
 
-        public RunningProcessDialog(IEnumerable<(string Name, string Title, string? Path)> processes, Icon? icon)
+        public RunningProcessDialog(IEnumerable<(string Name, string ClassName, string? Path)> processes, Icon? icon)
         {
-            _rows = new List<(string Name, string Title, string? Path)>(processes);
+            _rows = new List<(string Name, string ClassName, string? Path)>(processes);
 
             Text = "添加正在运行的程序";
             StartPosition = FormStartPosition.CenterParent;
@@ -33,10 +33,10 @@ namespace HdrBrightControl
             _list = new ListBox { Dock = DockStyle.Fill, IntegralHeight = false };
             foreach (var row in _rows)
             {
-                string displayTitle = row.Title.Length > TitleMaxLength
-                    ? row.Title[..(TitleMaxLength - 3)] + "..."
-                    : row.Title;
-                _list.Items.Add($"{row.Name}   —   {displayTitle}");
+                string displayClass = row.ClassName.Length > MaxDisplayLength
+                    ? row.ClassName[..(MaxDisplayLength - 3)] + "..."
+                    : row.ClassName;
+                _list.Items.Add($"{row.Name}   —   类：{displayClass}");
             }
 
             var ok = new Button { Text = "添加", DialogResult = DialogResult.OK, AutoSize = true };
@@ -68,7 +68,7 @@ namespace HdrBrightControl
             if (DialogResult == DialogResult.OK && _list.SelectedIndex >= 0)
             {
                 var row = _rows[_list.SelectedIndex];
-                Selected = (row.Name, row.Title, row.Path);
+                Selected = (row.Name, row.ClassName, row.Path);
             }
             base.OnFormClosing(e);
         }

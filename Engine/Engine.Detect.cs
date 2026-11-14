@@ -36,8 +36,8 @@ namespace HdrBrightControl
                     var program = snapshot.Programs.MatchProcess(name, process.Id).Program;
                     if (program == null) continue;
 
-                    // Skip programs with explicit window title constraints – they only match when their specific window is in front
-                    if (!string.IsNullOrWhiteSpace(program.WindowTitle)) continue;
+                    // Skip programs with explicit window class constraints – they only match when their specific window is in front
+                    if (!string.IsNullOrWhiteSpace(program.WindowClassName)) continue;
 
                     if (program.IsHdr)
                     {

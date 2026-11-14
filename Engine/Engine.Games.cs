@@ -17,22 +17,22 @@ namespace HdrBrightControl
             return trimmed.ToLowerInvariant();
         }
 
-        /// <summary>Parses a config entry into process name and optional window title.</summary>
-        internal static (string ProcessName, string? WindowTitle) ParseEntry(string entry)
+        /// <summary>Parses a config entry into process name and optional window class.</summary>
+        internal static (string ProcessName, string? WindowClass) ParseEntry(string entry)
         {
             int sepIndex = entry.IndexOf(EntrySeparator);
             if (sepIndex <= 0) return (entry.ToLowerInvariant(), null);
 
             var procName = entry[..sepIndex].ToLowerInvariant();
-            var winTitle = entry[(sepIndex + 1)..];
-            return string.IsNullOrWhiteSpace(winTitle) ? (procName, null) : (procName, winTitle);
+            var winClass = entry[(sepIndex + 1)..];
+            return string.IsNullOrWhiteSpace(winClass) ? (procName, null) : (procName, winClass);
         }
 
-        /// <summary>Formats a process name and optional window title into a config entry.</summary>
-        internal static string FormatEntry(string processName, string? windowTitle)
+        /// <summary>Formats a process name and optional window class into a config entry.</summary>
+        internal static string FormatEntry(string processName, string? windowClass)
         {
-            if (string.IsNullOrWhiteSpace(windowTitle)) return processName;
-            return string.Concat(processName, EntrySeparator, windowTitle);
+            if (string.IsNullOrWhiteSpace(windowClass)) return processName;
+            return string.Concat(processName, EntrySeparator, windowClass);
         }
 
         /// <summary>Rows for one of the two lists: every library game (real name, source, icon) plus its own programs.</summary>
@@ -52,10 +52,10 @@ namespace HdrBrightControl
 
                 foreach (string entry in processes)
                 {
-                    var (processName, windowTitle) = ParseEntry(entry);
-                    string displayName = !string.IsNullOrWhiteSpace(windowTitle) ? $"{processName}（{WindowTitleToDisplay(windowTitle)}）" : processName;
-                    string subtitle = !string.IsNullOrWhiteSpace(windowTitle)
-                        ? $"子窗口  ·  {windowTitle}"
+                    var (processName, windowClass) = ParseEntry(entry);
+                    string displayName = !string.IsNullOrWhiteSpace(windowClass) ? $"{processName}（类：{windowClass}）" : processName;
+                    string subtitle = !string.IsNullOrWhiteSpace(windowClass)
+                        ? $"子窗口  ·  {windowClass}"
                         : $"程序  ·  {processName}.exe";
 
                     rows.Add(new GameRow
@@ -74,12 +74,6 @@ namespace HdrBrightControl
                            .ThenBy(r => r.Name, Cmp)
                            .ToList();
             }
-        }
-
-        private static string WindowTitleToDisplay(string windowTitle)
-        {
-            const int MaxLen = 30;
-            return windowTitle.Length > MaxLen ? windowTitle[..(MaxLen - 3)] + "..." : windowTitle;
         }
 
         private static long LastLaunchTime(IEnumerable<string> processes, Dictionary<string, long> lastLaunched)

@@ -27,6 +27,9 @@ namespace HdrBrightControl
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
         [DllImport("user32.dll")]
         private static extern bool IsWindowVisible(IntPtr hWnd);
 
@@ -37,7 +40,7 @@ namespace HdrBrightControl
         private sealed class WindowInfo
         {
             public IntPtr Handle = IntPtrZero;
-            public string Title = string.Empty;
+            public string ClassName = string.Empty;
             public uint ProcessId;
             public bool IsChildWindow;
         }
@@ -217,11 +220,11 @@ namespace HdrBrightControl
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.WindowTitle);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.WindowClass);
             RebuildGames(kind);
         }
 
-        private (string Name, string? WindowTitle, string? Path)? PickRunningProcess()
+        private (string Name, string? WindowClass, string? Path)? PickRunningProcess()
         {
             var allWindows = new List<WindowInfo>();
 
@@ -232,15 +235,15 @@ namespace HdrBrightControl
                 GetWindowThreadProcessId(hWnd, out uint pid);
                 if (pid == 0) return false;
 
-                var titleBuf = new StringBuilder(512);
-                GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
-                string title = titleBuf.ToString();
-                if (string.IsNullOrWhiteSpace(title)) return true;
+                var classBuf = new StringBuilder(256);
+                GetClassName(hWnd, classBuf, classBuf.Capacity);
+                string className = classBuf.ToString();
+                if (string.IsNullOrWhiteSpace(className)) return true;
 
                 allWindows.Add(new WindowInfo
                 {
                     Handle = hWnd,
-                    Title = title,
+                    ClassName = className,
                     ProcessId = pid,
                     IsChildWindow = false
                 });
@@ -252,15 +255,15 @@ namespace HdrBrightControl
                     GetWindowThreadProcessId(childWnd, out uint childPid);
                     if (childPid != pid) return true;
 
-                    var childTitleBuf = new StringBuilder(512);
-                    GetWindowText(childWnd, childTitleBuf, childTitleBuf.Capacity);
-                    string childTitle = childTitleBuf.ToString();
-                    if (string.IsNullOrWhiteSpace(childTitle)) return true;
+                    var childClassBuf = new StringBuilder(256);
+                    GetClassName(childWnd, childClassBuf, childClassBuf.Capacity);
+                    string childClass = childClassBuf.ToString();
+                    if (string.IsNullOrWhiteSpace(childClass)) return true;
 
                     allWindows.Add(new WindowInfo
                     {
                         Handle = childWnd,
-                        Title = childTitle,
+                        ClassName = childClass,
                         ProcessId = pid,
                         IsChildWindow = true
                     });
@@ -271,7 +274,7 @@ namespace HdrBrightControl
                 return true;
             }, IntPtrZero);
 
-            var rows = new List<(string Name, string Title, string? Path)>();
+            var rows = new List<(string Name, string ClassName, string? Path)>();
 
             foreach (var group in allWindows.GroupBy(w => w.ProcessId))
             {
@@ -280,15 +283,15 @@ namespace HdrBrightControl
                     using var process = Process.GetProcessById((int)group.Key);
                     string processName = process.ProcessName.ToLowerInvariant();
 
-                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0).ThenBy(w => w.Title))
+                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0).ThenBy(w => w.ClassName))
                     {
-                        rows.Add((processName, window.Title, ProcessPaths.TryGetExePath(process.Id)));
+                        rows.Add((processName, window.ClassName, ProcessPaths.TryGetExePath(process.Id)));
                     }
                 }
                 catch { }
             }
 
-            rows = rows.OrderBy(row => row.Name).ThenBy(row => row.Title).ToList();
+            rows = rows.OrderBy(row => row.Name).ThenBy(row => row.ClassName).ToList();
 
             using var dialog = new RunningProcessDialog(rows, _windowIcon);
             if (dialog.ShowDialog(this) != DialogResult.OK) return null;

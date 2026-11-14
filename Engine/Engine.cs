@@ -110,26 +110,26 @@ namespace HdrBrightControl
                 var programs = new List<ListedProgram>(hdr.Count);
                 foreach (string entry in hdr)
                 {
-                    var (procName, winTitle) = HdrEngine.ParseEntry(entry);
-                    programs.Add(Listed(procName, isHdr: true, paths, winTitle));
+                    var (procName, windowClass) = HdrEngine.ParseEntry(entry);
+                    programs.Add(Listed(procName, isHdr: true, paths, windowClass));
                 }
 
                 foreach (string entry in c.SdrGamesAndApps ?? new List<string>())
                 {
                     var (procName, _) = HdrEngine.ParseEntry(entry);
                     if (!programs.Exists(p => string.Equals(p.Entry, procName, StringComparison.OrdinalIgnoreCase)))
-                        programs.Add(Listed(procName, isHdr: false, paths, winTitle: null));
+                        programs.Add(Listed(procName, isHdr: false, paths, windowClass: null));
                 }
 
                 return programs;
             }
 
-            private static ListedProgram Listed(string process, bool isHdr, Dictionary<string, string> paths, string? winTitle) => new()
+            private static ListedProgram Listed(string process, bool isHdr, Dictionary<string, string> paths, string? windowClass) => new()
             {
                 Entry = process,
                 IsHdr = isHdr,
                 ExePath = paths.TryGetValue(process, out var path) ? path : null,
-                WindowTitle = winTitle
+                WindowClassName = windowClass
             };
 
             /// <summary>TV brightness per list entry: per-program config value.</summary>
@@ -326,11 +326,11 @@ namespace HdrBrightControl
                 _nextProcessScanMs = 0;
             }
 
-            var (procName, procTitle, isFullscreen, procId) = WindowDetector.GetActiveWindowInfo();
+            var (procName, procClass, isFullscreen, procId) = WindowDetector.GetActiveWindowInfo();
             _foregroundProcess = procName;
             _foregroundFullscreen = isFullscreen;
 
-            UpdateForegroundProgram(snapshot, procName, procTitle, procId);
+            UpdateForegroundProgram(snapshot, procName, procClass, procId);
 
             RefreshHdrState(now);
 
