@@ -10,8 +10,8 @@ namespace HdrBrightControl
     {
         private const int MinDialogWidth = 640;
         private const int MinDialogHeight = 420;
-        private const int DefaultDialogWidth = 800;
-        private const int DefaultDialogHeight = 550;
+        private const int DefaultDialogWidth = 1000;
+        private const int DefaultDialogHeight = 650;
         private const int MaxDisplayLength = 80;
 
         private readonly ListBox _list;
