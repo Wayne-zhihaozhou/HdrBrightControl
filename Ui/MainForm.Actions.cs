@@ -4,6 +4,8 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -11,6 +13,34 @@ namespace HdrBrightControl
 {
     public sealed partial class MainForm
     {
+        private static readonly IntPtr IntPtrZero = IntPtr.Zero;
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr hWnd, EnumChildWindowsProc lpEnumFunc, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        private delegate bool EnumChildWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+        private sealed class WindowInfo
+        {
+            public IntPtr Handle = IntPtrZero;
+            public string Title = string.Empty;
+            public uint ProcessId;
+            public bool IsChildWindow;
+        }
         private void RebuildGames(ProgramListKind kind)
         {
             var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
@@ -193,19 +223,49 @@ namespace HdrBrightControl
 
         private (string Name, string? Path)? PickRunningProcess()
         {
+            var allWindows = new List<WindowInfo>();
+
+            EnumWindows((hWnd, _) =>
+            {
+                if (!IsWindowVisible(hWnd)) return true;
+
+                GetWindowThreadProcessId(hWnd, out uint pid);
+                if (pid == 0) return true;
+
+                var titleBuf = new StringBuilder(512);
+                GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
+                string title = titleBuf.ToString();
+                if (string.IsNullOrWhiteSpace(title)) return true;
+
+                allWindows.Add(new WindowInfo
+                {
+                    Handle = hWnd,
+                    Title = title,
+                    ProcessId = pid,
+                    IsChildWindow = false
+                });
+
+                return true;
+            }, IntPtrZero);
+
             var rows = new List<(string Name, string Title, string? Path)>();
-            foreach (var process in Process.GetProcesses())
+
+            foreach (var group in allWindows.GroupBy(w => w.ProcessId))
             {
                 try
                 {
-                    if (process.MainWindowHandle == IntPtr.Zero || string.IsNullOrWhiteSpace(process.MainWindowTitle)) continue;
-                    rows.Add((process.ProcessName.ToLowerInvariant(), process.MainWindowTitle, ProcessPaths.TryGetExePath(process.Id)));
+                    using var process = Process.GetProcessById((int)group.Key);
+                    string processName = process.ProcessName.ToLowerInvariant();
+
+                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0))
+                    {
+                        rows.Add((processName, window.Title, ProcessPaths.TryGetExePath(process.Id)));
+                    }
                 }
                 catch { }
-                finally { process.Dispose(); }
             }
 
-            rows = rows.GroupBy(row => row.Name).Select(group => group.First()).OrderBy(row => row.Name).ToList();
+            rows = rows.OrderBy(row => row.Name).ThenBy(row => row.Title).ToList();
 
             using var dialog = new RunningProcessDialog(rows, _windowIcon);
             if (dialog.ShowDialog(this) != DialogResult.OK) return null;
