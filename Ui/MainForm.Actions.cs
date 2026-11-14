@@ -230,7 +230,7 @@ namespace HdrBrightControl
                 if (!IsWindowVisible(hWnd)) return true;
 
                 GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid == 0) return true;
+                if (pid == 0) return false;
 
                 var titleBuf = new StringBuilder(512);
                 GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
@@ -245,6 +245,29 @@ namespace HdrBrightControl
                     IsChildWindow = false
                 });
 
+                EnumChildWindows(hWnd, (childWnd, _) =>
+                {
+                    if (!IsWindowVisible(childWnd)) return true;
+
+                    GetWindowThreadProcessId(childWnd, out uint childPid);
+                    if (childPid != pid) return true;
+
+                    var childTitleBuf = new StringBuilder(512);
+                    GetWindowText(childWnd, childTitleBuf, childTitleBuf.Capacity);
+                    string childTitle = childTitleBuf.ToString();
+                    if (string.IsNullOrWhiteSpace(childTitle)) return true;
+
+                    allWindows.Add(new WindowInfo
+                    {
+                        Handle = childWnd,
+                        Title = childTitle,
+                        ProcessId = pid,
+                        IsChildWindow = true
+                    });
+
+                    return true;
+                }, IntPtrZero);
+
                 return true;
             }, IntPtrZero);
 
@@ -257,7 +280,7 @@ namespace HdrBrightControl
                     using var process = Process.GetProcessById((int)group.Key);
                     string processName = process.ProcessName.ToLowerInvariant();
 
-                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0))
+                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0).ThenBy(w => w.Title))
                     {
                         rows.Add((processName, window.Title, ProcessPaths.TryGetExePath(process.Id)));
                     }
