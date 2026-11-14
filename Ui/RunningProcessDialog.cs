@@ -8,8 +8,10 @@ namespace HdrBrightControl
 {
     internal sealed class RunningProcessDialog : Form
     {
-        private const int DialogWidth = 640;
-        private const int DialogHeight = 420;
+        private const int MinDialogWidth = 640;
+        private const int MinDialogHeight = 420;
+        private const int DefaultDialogWidth = 800;
+        private const int DefaultDialogHeight = 550;
         private const int MaxDisplayLength = 80;
 
         private readonly ListBox _list;
@@ -23,10 +25,11 @@ namespace HdrBrightControl
 
             Text = "添加正在运行的程序";
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
+            FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
             MaximizeBox = false;
             ShowInTaskbar = false;
+            MinimumSize = new Size(MinDialogWidth, MinDialogHeight);
             Padding = new Padding(12);
             SuspendLayout();
 
@@ -56,7 +59,7 @@ namespace HdrBrightControl
             Controls.Add(_list);
             Controls.Add(bottom);
             Font = SystemFonts.MenuFont;
-            ClientSize = new Size(DialogWidth, DialogHeight);
+            ClientSize = new Size(DefaultDialogWidth, DefaultDialogHeight);
             AcceptButton = ok;
             CancelButton = cancel;
             Icon = icon;
