@@ -10,8 +10,6 @@ namespace HdrBrightControl
     {
         private const int MinDialogWidth = 640;
         private const int MinDialogHeight = 420;
-        private const int DefaultDialogWidth = 1000;
-        private const int DefaultDialogHeight = 650;
         private const int MaxDisplayLength = 80;
 
         private readonly ListBox _list;
@@ -23,8 +21,12 @@ namespace HdrBrightControl
         {
             _rows = new List<(string Name, string ClassName, string? Path)>(processes);
 
+            var screen = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+            int dialogWidth = Math.Max(MinDialogWidth, (int)(screen.Width * 0.75));
+            int dialogHeight = Math.Max(MinDialogHeight, (int)(screen.Height * 0.65));
+
             Text = "添加正在运行的程序";
-            StartPosition = FormStartPosition.CenterParent;
+            StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.Sizable;
             MinimizeBox = false;
             MaximizeBox = false;
@@ -59,7 +61,7 @@ namespace HdrBrightControl
             Controls.Add(_list);
             Controls.Add(bottom);
             Font = SystemFonts.MenuFont;
-            ClientSize = new Size(DefaultDialogWidth, DefaultDialogHeight);
+            ClientSize = new Size(dialogWidth, dialogHeight);
             AcceptButton = ok;
             CancelButton = cancel;
             Icon = icon;
