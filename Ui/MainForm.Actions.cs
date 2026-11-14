@@ -19,9 +19,6 @@ namespace HdrBrightControl
         private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
         [DllImport("user32.dll")]
-        private static extern bool EnumChildWindows(IntPtr hWnd, EnumChildWindowsProc lpEnumFunc, IntPtr lParam);
-
-        [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
@@ -34,16 +31,6 @@ namespace HdrBrightControl
         private static extern bool IsWindowVisible(IntPtr hWnd);
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-        private delegate bool EnumChildWindowsProc(IntPtr hWnd, IntPtr lParam);
-
-        private sealed class WindowInfo
-        {
-            public IntPtr Handle = IntPtrZero;
-            public string ClassName = string.Empty;
-            public uint ProcessId;
-            public bool IsChildWindow;
-        }
         private void RebuildGames(ProgramListKind kind)
         {
             var list = kind == ProgramListKind.Sdr ? _gamesSdr : _gamesHdr;
@@ -220,80 +207,62 @@ namespace HdrBrightControl
             var picked = PickRunningProcess();
             if (picked == null) return;
 
-            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.WindowClass);
+            _engine.AddGame(picked.Value.Name, exePath: picked.Value.Path, kind, picked.Value.Window);
             RebuildGames(kind);
         }
 
-        private (string Name, string? WindowClass, string? Path)? PickRunningProcess()
+        /// <summary>
+        /// Collects the visible top-level windows of all other processes. Child windows are left out on purpose: the
+        /// foreground window is always a top-level one, so an entry for a child window could never match.
+        /// </summary>
+        private (string Name, WindowFilter? Window, string? Path)? PickRunningProcess()
         {
-            var allWindows = new List<WindowInfo>();
+            var windows = new List<(uint ProcessId, string ClassName, string Title)>();
 
             EnumWindows((hWnd, _) =>
             {
                 if (!IsWindowVisible(hWnd)) return true;
 
                 GetWindowThreadProcessId(hWnd, out uint pid);
-                if (pid == 0) return false;
+                if (pid == 0) return true;
+
+                var titleBuf = new StringBuilder(512);
+                GetWindowText(hWnd, titleBuf, titleBuf.Capacity);
+                string title = titleBuf.ToString();
+                if (string.IsNullOrWhiteSpace(title)) return true;
 
                 var classBuf = new StringBuilder(256);
                 GetClassName(hWnd, classBuf, classBuf.Capacity);
                 string className = classBuf.ToString();
-                if (string.IsNullOrWhiteSpace(className)) return true;
 
-                allWindows.Add(new WindowInfo
-                {
-                    Handle = hWnd,
-                    ClassName = className,
-                    ProcessId = pid,
-                    IsChildWindow = false
-                });
-
-                EnumChildWindows(hWnd, (childWnd, _) =>
-                {
-                    if (!IsWindowVisible(childWnd)) return true;
-
-                    GetWindowThreadProcessId(childWnd, out uint childPid);
-                    if (childPid != pid) return true;
-
-                    var childClassBuf = new StringBuilder(256);
-                    GetClassName(childWnd, childClassBuf, childClassBuf.Capacity);
-                    string childClass = childClassBuf.ToString();
-                    if (string.IsNullOrWhiteSpace(childClass)) return true;
-
-                    allWindows.Add(new WindowInfo
-                    {
-                        Handle = childWnd,
-                        ClassName = childClass,
-                        ProcessId = pid,
-                        IsChildWindow = true
-                    });
-
-                    return true;
-                }, IntPtrZero);
-
+                windows.Add((pid, className, title));
                 return true;
             }, IntPtrZero);
 
-            var rows = new List<(string Name, string ClassName, string? Path)>();
+            var choices = new List<WindowChoice>();
+            var seen = new HashSet<(string Process, string Title)>();
 
-            foreach (var group in allWindows.GroupBy(w => w.ProcessId))
+            foreach (var window in windows.OrderBy(w => w.ProcessId).ThenBy(w => w.Title, StringComparer.CurrentCulture))
             {
                 try
                 {
-                    using var process = Process.GetProcessById((int)group.Key);
+                    using var process = Process.GetProcessById((int)window.ProcessId);
                     string processName = process.ProcessName.ToLowerInvariant();
+                    if (processName.Equals(HdrEngine.SelfProcessName, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!seen.Add((processName, window.Title))) continue;
 
-                    foreach (var window in group.OrderBy(w => w.IsChildWindow ? 1 : 0).ThenBy(w => w.ClassName))
-                    {
-                        rows.Add((processName, window.ClassName, ProcessPaths.TryGetExePath(process.Id)));
-                    }
+                    choices.Add(new WindowChoice(processName, window.ClassName, window.Title,
+                        ProcessPaths.TryGetExePath(process.Id)));
                 }
                 catch { }
             }
 
-            rows = rows.OrderBy(row => row.Name).ThenBy(row => row.ClassName).ToList();
+            choices = choices
+                .OrderBy(choice => choice.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(choice => choice.Title, StringComparer.CurrentCulture)
+                .ToList();
 
-            using var dialog = new RunningProcessDialog(rows, _windowIcon);
+            using var dialog = new RunningProcessDialog(choices, _windowIcon);
             if (dialog.ShowDialog(this) != DialogResult.OK) return null;
             return dialog.Selected;
         }

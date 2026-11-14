@@ -14,6 +14,42 @@ namespace HdrBrightControl
         Product
     }
 
+    /// <summary>Which window attribute a filter compares.</summary>
+    public enum WindowFilterKind
+    {
+        /// <summary>The window class name is this value (Chrome_WidgetWin_1 and the like).</summary>
+        ClassEquals,
+
+        /// <summary>Only a window whose title is exactly this value counts.</summary>
+        TitleEquals,
+
+        /// <summary>
+        /// Every window of the process counts except the one with this title. An application whose browsing window keeps
+        /// a fixed title and whose content windows are titled after the current document (a video, a tab) is separated
+        /// this way: the fixed title stays valid across restarts while the document titles change constantly.
+        /// </summary>
+        TitleNotEquals
+    }
+
+    /// <summary>
+    /// Restricts a list entry to some of a process's windows. Browsers and their players, and applications with a
+    /// separate content window, expose every window with the same class name, so the class name alone cannot tell
+    /// them apart; the title can, as long as it is the stable side of the pair that is compared.
+    /// </summary>
+    public sealed record WindowFilter(WindowFilterKind Kind, string Value)
+    {
+        public bool Matches(string? windowClass, string? windowTitle) => Kind switch
+        {
+            WindowFilterKind.ClassEquals => string.Equals(windowClass, Value, StringComparison.Ordinal),
+            WindowFilterKind.TitleEquals => string.Equals(windowTitle, Value, StringComparison.Ordinal),
+
+            // An untitled window is never taken for a content window: only a window with a title of its own is "other".
+            WindowFilterKind.TitleNotEquals => !string.IsNullOrEmpty(windowTitle) &&
+                                               !string.Equals(windowTitle, Value, StringComparison.Ordinal),
+            _ => true
+        };
+    }
+
     /// <summary>One program of the HDR or SDR list: the name the config uses, plus its exe when one is known.</summary>
     public sealed class ListedProgram
     {
@@ -23,8 +59,8 @@ namespace HdrBrightControl
 
         public string? ExePath { get; init; }
 
-        /// <summary>Optional window class name for per-window HDR/SDR control. When set, only windows of this class trigger the rule.</summary>
-        public string? WindowClassName { get; set; }
+        /// <summary>Optional restriction to some of the program's windows; null means every window of the process.</summary>
+        public WindowFilter? Window { get; init; }
     }
 
     /// <summary>Result of identifying a running process: the list entry it belongs to, and how it was recognised.</summary>
@@ -76,13 +112,16 @@ namespace HdrBrightControl
 
         /// <summary>The entry this running process belongs to, or a miss.</summary>
         public ProgramMatch MatchProcess(string processName, int processId) =>
-            MatchByWindow(processName, null, processId);
+            MatchByWindow(processName, null, null, processId);
 
-        /// <summary>The entry for a specific window: matches by process name and optional window class.</summary>
-        public ProgramMatch MatchByWindow(string processName, string? windowClass, int processId)
+        /// <summary>
+        /// The entry the window in front belongs to. A program without a window filter matches on its process name
+        /// alone; one with a filter only matches while the window in front satisfies it.
+        /// </summary>
+        public ProgramMatch MatchByWindow(string processName, string? windowClass, string? windowTitle, int processId)
         {
             var byName = Match(processName);
-            if (byName != null && HasNoWindowFilter(byName))
+            if (byName != null && MatchesWindow(byName, windowClass, windowTitle))
                 return new ProgramMatch(byName, ProgramMatchKind.Name);
 
             if (processId <= 0 || (_byExe.Count == 0 && _productFolders.Count == 0)) return ProgramMatch.None;
@@ -90,13 +129,8 @@ namespace HdrBrightControl
             string? exePath = ProgramIdentity.ExePath(processId, processName);
             if (exePath == null) return ProgramMatch.None;
 
-            if (_byExe.TryGetValue(exePath, out var byPath))
-            {
-                if (HasNoWindowFilter(byPath))
-                    return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
-                if (string.Equals(windowClass, byPath.WindowClassName, StringComparison.Ordinal))
-                    return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
-            }
+            if (_byExe.TryGetValue(exePath, out var byPath) && MatchesWindow(byPath, windowClass, windowTitle))
+                return new ProgramMatch(byPath, ProgramMatchKind.ExePath);
 
             // Only exes that share a folder with a listed program are worth their version info
             string? folder = Folder(exePath);
@@ -106,18 +140,23 @@ namespace HdrBrightControl
             if (product == null) return ProgramMatch.None;
 
             var key = ProductKey(folder, product);
-            if (!_byProduct.TryGetValue(key, out var byProduct)) return ProgramMatch.None;
-
-            if (HasNoWindowFilter(byProduct))
-                return new ProgramMatch(byProduct, ProgramMatchKind.Product);
-            if (string.Equals(windowClass, byProduct.WindowClassName, StringComparison.Ordinal))
+            if (_byProduct.TryGetValue(key, out var byProduct) && MatchesWindow(byProduct, windowClass, windowTitle))
                 return new ProgramMatch(byProduct, ProgramMatchKind.Product);
 
             return ProgramMatch.None;
         }
 
-        private static bool HasNoWindowFilter(ListedProgram program) =>
-            string.IsNullOrWhiteSpace(program.WindowClassName);
+        /// <summary>
+        /// True when the window satisfies the program's filter. Without a filter every window matches; with one, an
+        /// unknown window (no class and no title, as reported for this app's own window or for none at all) never does.
+        /// </summary>
+        private static bool MatchesWindow(ListedProgram program, string? windowClass, string? windowTitle)
+        {
+            if (program.Window == null) return true;
+            if (string.IsNullOrEmpty(windowClass) && string.IsNullOrEmpty(windowTitle)) return false;
+
+            return program.Window.Matches(windowClass, windowTitle);
+        }
 
         private void IndexExe(ListedProgram program)
         {

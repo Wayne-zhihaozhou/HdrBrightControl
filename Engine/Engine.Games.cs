@@ -8,6 +8,9 @@ namespace HdrBrightControl
     public sealed partial class HdrEngine
     {
         private const string EntrySeparator = "|";
+        private const string TitleEqualsPrefix = "T=";
+        private const string TitleNotEqualsPrefix = "T!=";
+        private const string ClassEqualsPrefix = "C=";
 
         internal static string CleanExeInput(string rawInput)
         {
@@ -17,22 +20,58 @@ namespace HdrBrightControl
             return trimmed.ToLowerInvariant();
         }
 
-        /// <summary>Parses a config entry into process name and optional window class.</summary>
-        internal static (string ProcessName, string? WindowClass) ParseEntry(string entry)
+        /// <summary>
+        /// Parses a config entry: the process name, and optionally the window filter after "|".
+        /// "T=" is an exact title, "T!=" every title but that one, "C=" a window class. A bare value behind the
+        /// separator is read as a class name, which is what an earlier version wrote there.
+        /// </summary>
+        internal static (string ProcessName, WindowFilter? Window) ParseEntry(string entry)
         {
-            int sepIndex = entry.IndexOf(EntrySeparator);
-            if (sepIndex <= 0) return (entry.ToLowerInvariant(), null);
+            int separator = entry.IndexOf(EntrySeparator);
+            if (separator <= 0) return (entry.ToLowerInvariant(), null);
 
-            var procName = entry[..sepIndex].ToLowerInvariant();
-            var winClass = entry[(sepIndex + 1)..];
-            return string.IsNullOrWhiteSpace(winClass) ? (procName, null) : (procName, winClass);
+            string processName = entry[..separator].ToLowerInvariant();
+            string spec = entry[(separator + 1)..];
+            if (string.IsNullOrWhiteSpace(spec)) return (processName, null);
+
+            if (spec.StartsWith(TitleNotEqualsPrefix, StringComparison.Ordinal))
+                return (processName, new WindowFilter(WindowFilterKind.TitleNotEquals, spec[TitleNotEqualsPrefix.Length..]));
+            if (spec.StartsWith(TitleEqualsPrefix, StringComparison.Ordinal))
+                return (processName, new WindowFilter(WindowFilterKind.TitleEquals, spec[TitleEqualsPrefix.Length..]));
+            if (spec.StartsWith(ClassEqualsPrefix, StringComparison.Ordinal))
+                return (processName, new WindowFilter(WindowFilterKind.ClassEquals, spec[ClassEqualsPrefix.Length..]));
+
+            return (processName, new WindowFilter(WindowFilterKind.ClassEquals, spec));
         }
 
-        /// <summary>Formats a process name and optional window class into a config entry.</summary>
-        internal static string FormatEntry(string processName, string? windowClass)
+        /// <summary>Formats a process name and its optional window filter into a config entry.</summary>
+        internal static string FormatEntry(string processName, WindowFilter? window)
         {
-            if (string.IsNullOrWhiteSpace(windowClass)) return processName;
-            return string.Concat(processName, EntrySeparator, windowClass);
+            if (window == null || string.IsNullOrWhiteSpace(window.Value)) return processName;
+
+            string prefix = window.Kind switch
+            {
+                WindowFilterKind.TitleNotEquals => TitleNotEqualsPrefix,
+                WindowFilterKind.TitleEquals => TitleEqualsPrefix,
+                _ => ClassEqualsPrefix
+            };
+            return string.Concat(processName, EntrySeparator, prefix, window.Value);
+        }
+
+        /// <summary>How a window filter reads in the list.</summary>
+        private static string DescribeWindow(WindowFilter? window) => window switch
+        {
+            null => string.Empty,
+            { Kind: WindowFilterKind.TitleNotEquals } filter => $"除「{Shorten(filter.Value)}」以外的窗口",
+            { Kind: WindowFilterKind.TitleEquals } filter => $"仅「{Shorten(filter.Value)}」",
+            { Kind: WindowFilterKind.ClassEquals } filter => $"窗口类 {filter.Value}",
+            _ => string.Empty
+        };
+
+        private static string Shorten(string value)
+        {
+            const int MaxLength = 32;
+            return value.Length <= MaxLength ? value : value[..(MaxLength - 3)] + "...";
         }
 
         /// <summary>Rows for one of the two lists: every library game (real name, source, icon) plus its own programs.</summary>
@@ -41,7 +80,6 @@ namespace HdrBrightControl
             lock (Sync)
             {
                 var list = kind == ProgramListKind.Sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
-                var tracked = new HashSet<string>(list ?? new List<string>(), Cmp);
                 var paths = Config.ProgramPaths ?? new Dictionary<string, string>();
                 var brightnessMap = Config.PerGameBrightness ?? new Dictionary<string, int>();
                 var hdrModes = Config.GameHdrModes;
@@ -52,11 +90,12 @@ namespace HdrBrightControl
 
                 foreach (string entry in processes)
                 {
-                    var (processName, windowClass) = ParseEntry(entry);
-                    string displayName = !string.IsNullOrWhiteSpace(windowClass) ? $"{processName}（类：{windowClass}）" : processName;
-                    string subtitle = !string.IsNullOrWhiteSpace(windowClass)
-                        ? $"子窗口  ·  {windowClass}"
-                        : $"程序  ·  {processName}.exe";
+                    var (processName, window) = ParseEntry(entry);
+                    string windowText = DescribeWindow(window);
+                    string displayName = windowText.Length == 0 ? processName : $"{processName}（{windowText}）";
+                    string subtitle = windowText.Length == 0
+                        ? $"程序  ·  {processName}.exe"
+                        : $"窗口限定  ·  {windowText}";
 
                     rows.Add(new GameRow
                     {
@@ -104,8 +143,11 @@ namespace HdrBrightControl
             Log("BRIGHT", $"'{displayName}' 亮度设为 {value}");
         }
 
-        /// <summary>Adds a program to one of the two lists; it is removed from the other one.</summary>
-        public bool AddGame(string procName, string? exePath = null, ProgramListKind kind = ProgramListKind.Hdr, string? windowTitle = null)
+        /// <summary>
+        /// Adds a program to one of the two lists; it is removed from the other one. Adding a program that is already
+        /// listed replaces its entry, which is how the window scope of an existing entry is changed.
+        /// </summary>
+        public bool AddGame(string procName, string? exePath = null, ProgramListKind kind = ProgramListKind.Hdr, WindowFilter? window = null)
         {
             if (string.IsNullOrWhiteSpace(procName) ||
                 procName.Equals(ProcessNames.Explorer, StringComparison.OrdinalIgnoreCase) ||
@@ -117,32 +159,26 @@ namespace HdrBrightControl
 
             procName = procName.ToLowerInvariant();
             string listName = kind == ProgramListKind.Sdr ? "SDR" : "HDR";
-            string configEntry = FormatEntry(procName, windowTitle);
+            WindowFilter? filter = window == null || string.IsNullOrWhiteSpace(window.Value) ? null : window;
+            string configEntry = FormatEntry(procName, filter);
+            string windowText = DescribeWindow(filter);
 
             lock (Sync)
             {
                 var target = kind == ProgramListKind.Sdr ? Config.SdrGamesAndApps : Config.HdrGamesAndApps;
                 var other = kind == ProgramListKind.Sdr ? Config.HdrGamesAndApps : Config.SdrGamesAndApps;
 
-                if (!target.Exists(e => Cmp.Equals(ParseEntry(e).ProcessName, procName)))
-                {
-                    target.Add(configEntry);
-                    target.Sort(Cmp);
-                    Log("LIST", $"+ '{procName}' 已添加到 {listName} 列表");
-                }
-                else
-                {
-                    Log("LIST", $"'{procName}' 已在 {listName} 列表中");
-                }
+                bool wasListed = target.Exists(entry => Cmp.Equals(ParseEntry(entry).ProcessName, procName));
+                target.RemoveAll(entry => Cmp.Equals(ParseEntry(entry).ProcessName, procName));
+                other.RemoveAll(entry => Cmp.Equals(ParseEntry(entry).ProcessName, procName));
 
-                foreach (var otherEntry in other.ToList())
-                {
-                    if (Cmp.Equals(ParseEntry(otherEntry).ProcessName, procName))
-                    {
-                        other.Remove(otherEntry);
-                        Log("LIST", $"'{procName}' 已从 {(kind == ProgramListKind.Sdr ? "SDR" : "HDR")} 列表移除");
-                    }
-                }
+                target.Add(configEntry);
+                target.Sort(Cmp);
+
+                string scope = windowText.Length == 0 ? string.Empty : $"（{windowText}）";
+                Log("LIST", wasListed
+                    ? $"'{procName}' 的 {listName} 条目已更新{scope}"
+                    : $"+ '{procName}' 已添加到 {listName} 列表{scope}");
 
                 if (kind == ProgramListKind.Sdr) Config.GameHdrModes.Remove(procName);
                 else Config.GameHdrModes[procName] = true;

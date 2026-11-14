@@ -57,24 +57,33 @@ namespace HdrBrightControl
         private static uint _cachedPid;
         private static string _cachedName = string.Empty;
 
+        [ThreadStatic]
+        private static StringBuilder? _textBuffer;
+
         /// <summary>
-        /// Process name, window class name, fullscreen state and process id of the window in front
-        /// (empty strings and 0 when there is none).
+        /// Process name, window class, window title, fullscreen state and process id of the window in front
+        /// (empty strings and 0 when there is none). The title is read every tick because applications change it
+        /// constantly; the class is what stays stable, the title is what separates windows of the same class.
         /// </summary>
-        public static (string ProcessName, string WindowClass, bool IsFullscreen, int ProcessId) GetActiveWindowInfo()
+        public static (string ProcessName, string WindowClass, string WindowTitle, bool IsFullscreen, int ProcessId) GetActiveWindowInfo()
         {
             IntPtr hWnd = GetForegroundWindow();
-            if (hWnd == IntPtr.Zero) return (string.Empty, string.Empty, false, 0);
+            if (hWnd == IntPtr.Zero) return (string.Empty, string.Empty, string.Empty, false, 0);
 
-            var classBuf = new StringBuilder(256);
+            var classBuf = _textBuffer ??= new StringBuilder(512);
+            classBuf.Clear();
             GetClassName(hWnd, classBuf, classBuf.Capacity);
             string windowClass = classBuf.ToString();
+
+            classBuf.Clear();
+            GetWindowText(hWnd, classBuf, classBuf.Capacity);
+            string windowTitle = classBuf.ToString();
 
             GetWindowThreadProcessId(hWnd, out uint pid);
             string processName = GetProcessNameCached(hWnd, pid);
             bool isFullscreen = !IsShellProcess(processName) && IsWindowFullscreen(hWnd);
 
-            return (processName, windowClass, isFullscreen, (int)pid);
+            return (processName, windowClass, windowTitle, isFullscreen, (int)pid);
         }
 
         /// <summary>The desktop and the search window are never "fullscreen content".</summary>
