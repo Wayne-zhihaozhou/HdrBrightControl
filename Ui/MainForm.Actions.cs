@@ -98,8 +98,6 @@ namespace HdrBrightControl
 
         private async Task<TvResult> SetTestBrightnessAsync(int brightness)
         {
-            if (!IsBrightnessControlEnabled()) return new TvResult(false, "亮度控制已关闭");
-
             return await TvCli.SetBrightnessAsync(brightness);
         }
 
