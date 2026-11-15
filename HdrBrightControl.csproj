@@ -19,7 +19,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <RootNamespace>HdrBrightControl</RootNamespace>
     <AssemblyName>HdrBrightControl</AssemblyName>
-    <Version>2.6.3</Version>
+    <Version>2.6.5</Version>
     <!-- Shown in the exe's Properties › Details -->
     <Product>HDR亮控</Product>
     <Authors>Wayne-zhihaozhou</Authors>
