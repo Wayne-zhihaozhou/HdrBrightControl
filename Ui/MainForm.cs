@@ -243,9 +243,8 @@ namespace HdrBrightControl
             }
 
             if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-            TopMost = true;
-            TopMost = false;
-            Activate();
+
+            WindowActivation.BringToForeground(Handle);
             RefreshView();
         }
 

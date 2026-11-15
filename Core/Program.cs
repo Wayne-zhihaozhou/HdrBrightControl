@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -19,6 +18,8 @@ namespace HdrBrightControl
         private readonly TvBrightnessService _tvService;
         private readonly ITrayService _tray;
         private readonly IStartupManager _startup;
+        private readonly SingleInstance _instance;
+        private readonly Control _dispatcher = new();
         private readonly System.Windows.Forms.Timer _timer;
 
         private MainForm? _form;
@@ -29,11 +30,12 @@ namespace HdrBrightControl
 
         public IStartupManager StartupManager => _startup;
 
-        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, IStartupManager startup)
+        public TrayAppContext(HdrEngine engine, TvBrightnessService tvService, IStartupManager startup, SingleInstance instance)
         {
             _engine = engine;
             _tvService = tvService;
             _startup = startup;
+            _instance = instance;
 
             _tray = new TrayService(ShowMain, Exit);
 
@@ -48,6 +50,19 @@ namespace HdrBrightControl
             if (_startup.RefreshPath())
                 _engine.Log("INFO", "\"开机自启动\"指向了旧位置 – 已更新为本程序。");
 
+            ShowMain();
+            StartListeningForActivation();
+        }
+
+        private void StartListeningForActivation()
+        {
+            _ = _dispatcher.Handle;
+            _instance.ListenForActivationRequests(_dispatcher, OnAnotherLaunchRequested);
+        }
+
+        private void OnAnotherLaunchRequested()
+        {
+            _engine.Log("INFO", "检测到再次启动 – 正在将窗口切换到前台。");
             ShowMain();
         }
 
@@ -130,6 +145,7 @@ namespace HdrBrightControl
             }
             _form = null;
 
+            _dispatcher.Dispose();
             _tray.Dispose();
             ExitThread();
         }
@@ -154,9 +170,8 @@ namespace HdrBrightControl
         {
             SetTaskbarIdentity(AppUserModelId);
 
-            using var mutex = new Mutex(true, @"Local\HdrBrightControl.SingleInstance", out bool isFirstInstance);
-
-            if (!isFirstInstance) return;
+            using var instance = SingleInstance.TryStartPrimary();
+            if (instance is null) return;
 
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
@@ -175,8 +190,7 @@ namespace HdrBrightControl
             Application.ThreadException += (_, e) => engine.WriteLine($"ERROR  界面异常：{e.Exception}");
             AppDomain.CurrentDomain.UnhandledException += (_, e) => engine.WriteLine($"FATAL  {e.ExceptionObject}");
 
-            var context = new TrayAppContext(engine, tvService, startupManager);
-            var trayService = context.TrayService;
+            var context = new TrayAppContext(engine, tvService, startupManager, instance);
             startupManager.RefreshPath();
 
             using (context)
